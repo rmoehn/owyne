@@ -3,6 +3,8 @@
             [clojure.java.shell :as shell]
             [clojure.pprint :refer [pprint]]
             [clojure.repl :refer [pst doc find-doc]]
+            [clojure.spec.alpha :as s]
+            [clojure.string :as string]
             [clojure.tools.namespace.repl :refer [refresh]]
             [cheshire.core :as cheshire]))
 
@@ -25,22 +27,28 @@
 ;; - Nice to have:
 ;;    - Integrate with Gorilla REPL.
 
+(create-ns 'owyne.job) 
+(alias 'job 'owyne.job) 
+
+(create-ns 'owyne.webppl) 
+(alias 'webppl 'owyne.webppl) 
+
 (def job1 {::job/type ::job/webppl
            ::webppl/requires ["webppl-dp" "webppl-agents"]
            ::webppl/args {:softmax-noise 30
                           :prior "original"}})
 
 (def job2 (assoc job1 ::webppl/args {:softmax-noise 1000
-                                     :prior "optimistic"}) 
+                                     :prior "optimistic"}))
                                      
 
-(def job1-res (run job1 {::n-exec 500 ::n-parallel 4}))
+;(def job1-res (run job1 {::n-exec 500 ::n-parallel 4}))
 ; In this case, WebPPL should run and return the results of 125 executions,
 ; because we don't want recompiles.
 
 
 (defn keyword->ddash [k]
-  (str "--" (name ddash)) 
+  (str "--" (name k)))
 
 
 (defn tolerantly-parse-json [s]
@@ -49,8 +57,7 @@
                           (catch com.fasterxml.jackson.core.JsonParseException e
                             ::invalid-input)) 
                     lines)] 
-    (remove #{::invalid-input} parsed) 
-
+    (remove #{::invalid-input} parsed))) 
 
 
 (defn webppl [path-to-script requires args]
@@ -60,24 +67,24 @@
         {:keys [exit out err]}
         (apply shell/sh "webppl" path-to-script 
                (concat require-args other-args))] 
-    (when (!= exit 0)
+    (when (not= exit 0)
       (throw (ex-info "WebPPL script returned non-zero exit code."
                       {:exit exit :out out :err err})))
-    (tolerantly-parse-json out))) 
+    (tolerantly-parse-json out)))
  
 
 (comment
 
   (def
-    (shell/sh path-to-) 
+    (shell/sh path-to-)) 
 
 )
 
-(def job2-res (run job2 {::n-exec 250 ::n-parallel 4})) 
+;(def job2-res (run job2 {::n-exec 250 ::n-parallel 4})) 
 
            
-(average (map :return @job1-res)) 
-(stddev (map :return @job1-res)) 
+;(average (map :return @job1-res)) 
+;(stddev (map :return @job1-res)) 
   ; WebPPL result automatically parsed.
 
 (def noises-priors [[30   "original"]
@@ -104,7 +111,7 @@
                                      :regrets    ::sequential-numbers
                                      :rewards    ::sequential-numbers))
 
-(run (map noise-prior-job noises-priors))
+;(run (map noise-prior-job noises-priors))
 
 (s/def ::this-result (s/coll-of ::noises-priors-result)) 
   ; The results from all the executions.
@@ -115,11 +122,11 @@
 ; [{::job … ::exec … ::result [noises-priors-result]}]
 
 ;              jobs            execs
-(sr/transform [sr/ALL ::result s/ALL (sr/collect-one :regrets) ::total-regret]
+#_(sr/transform [sr/ALL ::result s/ALL (sr/collect-one :regrets) ::total-regret]
               (fn [regrets _] (reduce + regrets))
               run-result)
 
-(sr/transform [sr/ALL]) 
+#_(sr/transform [sr/ALL]) 
 ;; => {::job/type ::job/webppl ::webppl/args … ::job/result}
 
 
