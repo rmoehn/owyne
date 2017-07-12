@@ -6,7 +6,9 @@
             [clojure.spec.alpha :as s]
             [clojure.string :as string]
             [clojure.tools.namespace.repl :refer [refresh]]
-            [cheshire.core :as cheshire]))
+            [cheshire.core :as cheshire]
+            [com.climate.claypoole :as claypoole]
+            [such.imperfection :as imperfection]))
 
 ;; What do I neede?
 ;;
@@ -26,6 +28,7 @@
 ;;
 ;; - Nice to have:
 ;;    - Integrate with Gorilla REPL.
+;;    - Reduce start-up time by precompiling.
 
 (create-ns 'owyne.job) 
 (alias 'job 'owyne.job) 
@@ -53,30 +56,52 @@
 
 (defn tolerantly-parse-json [s]
   (let [lines (string/split-lines s)
-        parsed (map #(try (cheshire/parse-string s true)
+        parsed (map #(try (cheshire/parse-string % true)
                           (catch com.fasterxml.jackson.core.JsonParseException e
                             ::invalid-input)) 
                     lines)] 
     (remove #{::invalid-input} parsed))) 
 
 
-(defn webppl [path-to-script requires args]
-  (let [require-args  (mapcat #(vec "--require" %) requires) 
-        other-args    (mapcat #(vec (keyword->ddash (key %)) (val %)))
-        
-        {:keys [exit out err]}
-        (apply shell/sh "webppl" path-to-script 
-               (concat require-args other-args))] 
-    (when (not= exit 0)
-      (throw (ex-info "WebPPL script returned non-zero exit code."
-                      {:exit exit :out out :err err})))
-    (tolerantly-parse-json out)))
- 
+(defn webppl 
+  ([path-to-script] (webppl path-to-script [] []))
+  ([path-to-script requires] (webppl path-to-script requires []))
+  ([path-to-script requires args]
+   (let [require-args  (mapcat #(vector "--require" %) requires) 
+         other-args    (cons "--" (mapcat #(vector (keyword->ddash (key %)) 
+                                                   (str (val %))) 
+                                          args))
+
+         {:keys [exit out err]}
+         (apply shell/sh "webppl" path-to-script
+                (concat require-args other-args))] 
+     (when (not= exit 0)
+       (throw (ex-info "WebPPL script returned non-zero exit code."
+                       {:exit exit :out out :err err})))
+     (tolerantly-parse-json out))))
+
+
+(defn run-webppl [threadpool n-threads webppl-thunk]
+  (mapcat first
+          (apply claypoole/upcalls threadpool (repeat n-threads webppl-thunk))))
+
 
 (comment
 
-  (def
-    (shell/sh path-to-)) 
+  (def res 
+    (claypoole/with-shutdown! [pool (claypoole/threadpool (claypoole/ncpus))]
+      (run-webppl pool (claypoole/ncpus) 
+                  #(webppl "../small.webppl" [] {:n-execs 10}))))
+
+  (let [sums (map #(reduce + %) res)]
+    (/ (reduce + sums) (count sums)))
+
+(apply shell/sh "webppl" "../small.webppl" "--" ["--n-execs" "3"])
+
+  
+
+  (apply claypoole/upcalls :builtin (repeat 4 (fn [] (webppl "../small.webppl"))))
+
 
 )
 
